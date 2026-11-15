@@ -3,8 +3,10 @@
 描述统计与稳健分布的真实业务分析小型项目。完整模拟客户、痛点、上下游、算法公式与一天工作剧本见 [BUSINESS.md](BUSINESS.md)。
 
 ## 模块与业务流程
-数据接入（JSON/CSV、字段验证、批次指纹）→ 参数化分析（异步 Python worker）→ 结果复核（指标、图形、明细、解释、批准）→ 定时分发（本地收件箱、CSV/JSON、SHA256）；另有业务总览和审计轨迹。
-三个贯穿全栈的实体：Dataset 数据批次、Job 分析任务、Report 分发计划；辅助 User、Audit、Delivery。
+双来源对账（出窑台账 + 终检表，修订择优合并、差异裁定、发布门禁）→ 数据接入（JSON/CSV、字段验证、批次指纹）→ 参数化分析（异步 Python worker）→ 结果复核（指标、图形、明细、解释、批准）→ 定时分发（本地收件箱、CSV/JSON、SHA256）；另有业务总览和审计轨迹。
+四个贯穿全栈的实体：ReconciliationStatement 双来源对账单、Dataset 数据批次、Job 分析任务、Report 分发计划；辅助 User、Audit、Delivery、SourceSubmission、LedgerEntry、Adjudication、PublishedBatch。
+
+对账规则详见 [BUSINESS.md](BUSINESS.md)：双方到齐且件数相符或差异经裁定才可发布；迟到旧修订不覆盖新值；源数据更新让裁定失效；发布按 request_id 与内容指纹幂等，发布后修订另开版本，既有复盘不改写。
 
 ## 快速启动
 ```bash
@@ -18,8 +20,8 @@ docker compose exec -T backend python -m scripts.seed_demo
 ## 演示账号与权限
 |账号|密码|真实权限|
 |---|---|---|
-|admin@demo.local|Demo123!|接入、执行、批准、分发、暂停、读取与下载|
-|analyst@demo.local|Demo123!|接入、执行、读取与下载；不能批准或安排分发|
+|admin@demo.local|Demo123!|接入、对账裁定、执行、批准、发布、分发、暂停、读取与下载|
+|analyst@demo.local|Demo123!|接入、导入两侧源表、执行、读取与下载；不能裁定或发布|
 |viewer@demo.local|Demo123!|只读与下载|
 
 ## 技术与本地开发
@@ -27,9 +29,16 @@ Python 3.12 / FastAPI / SQLAlchemy / NumPy / SciPy / scikit-learn；PostgreSQL 1
 后端：安装 backend/requirements.txt，设置 DATABASE_URL、REDIS_URL、JWT_SECRET、ARTIFACT_DIR 后在 backend/ 执行 `python -m migrations.initial`、`python -m scripts.seed_demo`、`uvicorn src.main:app`，另开 `python -m src.worker`。前端使用带 /api 反向代理的 Nginx，直接打开 index.html 不支持 API。
 
 ## 目录与工程约定
-backend/src/{models,schemas,services,routes,controllers,middlewares,constants,config,utils}；backend/scripts/seed_demo.py；backend/migrations/initial.py。
+backend/src/{models,schemas,services,routes,controllers,middlewares,constants,config,utils}；backend/scripts/seed_demo.py；backend/migrations/initial.py；backend/tests/test_reconciliation.py。双来源对账实现见 `services/reconciliation.py`、`models/reconciliation.py`、`routes/reconciliations.py` 与 `frontend/src/pages/reconcile.js`。
 frontend/src/{api,stores,types,components/common,hooks,pages,router,utils,constants}。
 Role 枚举：admin/analyst/viewer；JobStatus：queued/running/completed/failed。后端 backend/src/constants/enums.py，前端 frontend/src/constants/enums.js；路由权限在 middlewares/auth.py；页面按相同角色控制操作入口。
+
+## 测试
+```bash
+cd backend
+python -m pytest tests/test_reconciliation.py -q   # 临时 SQLite，不依赖 Docker
+```
+覆盖：两侧到齐、差异裁定、缺失阻塞、迟到修订不覆盖、裁定失效、旧令牌拒绝、发布幂等、发布后版本化与来源追溯。
 
 ## 环境变量与 Docker
 COMPOSE_PROJECT_NAME=kiln-yield；FRONTEND_PORT=18200；BACKEND_PORT=19200；DB_PORT=17700；DB_PASSWORD、JWT_SECRET 见 .env.example；SEED_DEMO 默认 true。共享命名产物卷供后端下载与 worker 写入，数据库/Redis 各持久卷。

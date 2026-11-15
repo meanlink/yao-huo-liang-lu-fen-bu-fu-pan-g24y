@@ -15,6 +15,8 @@ def metadata():
         "downstream": "烧成班长据此决定复核窑次与工艺试验顺序",
         "entities": ["窑次样本", "分布复盘", "班组复核简报"],
         "dataset_name": "11 月第一周 · 120 窑次质检",
+        "reconciliation": {"left": "出窑台账", "right": "终检表",
+                           "demo_left_revision": "R-0007", "demo_right_revision": "T-0004"},
         "columns": [{"key": "batch", "label": "窑次", "type": "string"}, {"key": "line", "label": "窑线", "type": "string"}, {"key": "fired", "label": "烧成件数", "type": "number"}, {"key": "passed", "label": "合格件数", "type": "number"}],
         "parameters": [{"key": "iqr_factor", "label": "异常围栏倍数", "type": "number", "default": 1.5, "min": 0.5, "max": 3}, {"key": "target", "label": "目标良率（%）", "type": "number", "default": 93, "min": 50, "max": 100}],
         "workbench_title": "批次分布复盘", "action_label": "计算分位与复核名单", "unit": "%",
@@ -70,3 +72,25 @@ def analyze(records, params):
             "chart": {"type": "bar", "labels": [f"{edges[i]:.1f}–{edges[i+1]:.1f}" for i in range(len(hist))], "series": [{"name": "窑次数", "values": hist.tolist()}]},
             "findings": [f"中位数 {median:.2f}%，P90 {p90:.2f}%，MAD {mad:.2f} 个百分点。", f"当前下围栏 {lower:.2f}%，上围栏 {upper:.2f}%；倍数为 {factor:g}。", f"{sum(r['yield'] < target for r in clean)} 个窑次未达到 {target:g}% 目标；异常与未达标是两种口径。"],
             "method": metadata()["method"], "warnings": ["分布围栏用于定位复核对象，不能替代工艺判定。"]}
+
+
+def seed_source_pairs(records=None):
+    """演示双来源：终检表在台账基础上对少数窑次复称，形成可裁定的真实差异。
+
+    演示数据不制造缺失，便于走完“导入两侧 → 裁定差异 → 发布”的验收剧本；
+    缺失场景可在页面再导入一版只含部分窑次的源表复现。
+    """
+    rows = records or seed_records()
+    ledger, inspection = [], []
+    for i, row in enumerate(rows):
+        ledger.append({'batch': row['batch'], 'line': row['line'],
+                       'fired': row['fired'], 'passed': row['passed']})
+        final = dict(row)
+        if i % 29 == 4:
+            final['passed'] = min(final['fired'], final['passed'] + 3)   # 终检复称多计
+        if i % 37 == 6:
+            final['fired'] = final['fired'] - 2                           # 装窑数复点
+            final['passed'] = min(final['fired'], final['passed'])
+        inspection.append({'batch': final['batch'], 'line': final['line'],
+                           'fired': final['fired'], 'passed': final['passed']})
+    return ledger, inspection
